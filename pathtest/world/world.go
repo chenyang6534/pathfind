@@ -23,6 +23,10 @@ type World struct {
 
 	// 性能统计收集器（低耦合独立模块）
 	stats *PathStatsCollector
+
+	// 静态可见性图缓存（预计算优化）
+	staticGraphCache *pathfinding.StaticGraphCache
+	staticObstacles  []*pathfinding.Obstacle // 静态障碍物列表（用于寻路）
 }
 
 // New 创建世界实例并启动主循环和后台寻路协程
@@ -122,6 +126,23 @@ func (w *World) Init(mapW, mapH float64, obs []InitObstacle) {
 
 		// 重置统计收集器
 		w.stats = NewPathStatsCollector(20)
+
+		// 提取静态障碍物并预构建静态可见性图
+		staticObs := make([]*pathfinding.Obstacle, 0, len(obstacles))
+		for _, obs := range obstacles {
+			if !obs.Moving {
+				staticObs = append(staticObs, obs)
+			}
+		}
+		w.staticObstacles = staticObs
+
+		// 预构建常用移动者尺寸的静态图（正方形：32, 64, 128, 256）
+		bounds := pathfinding.MapBounds{MinX: 0, MinY: 0, MaxX: mapW, MaxY: mapH}
+		w.staticGraphCache = pathfinding.NewStaticGraphCache(bounds)
+		if len(staticObs) > 0 {
+			commonSizes := []float64{32, 64, 128, 256}
+			w.staticGraphCache.PreBuildAll(staticObs, commonSizes)
+		}
 	})
 }
 
