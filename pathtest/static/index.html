@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>矩形绕路寻路算法 - 50000×50000 大地图</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: #1a1a2e; color: #e0e0e0;
+  display: flex; height: 100vh; overflow: hidden;
+}
+.canvas-area { flex:1; display:flex; align-items:center; justify-content:center; padding:12px; position:relative; }
+canvas {
+  background: #16213e; border: 2px solid #0f3460; border-radius: 8px;
+  cursor: crosshair; box-shadow: 0 0 30px rgba(15,52,96,0.5);
+}
+.panel {
+  width: 300px; background: #16213e; border-left: 2px solid #0f3460;
+  padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto;
+}
+.panel h2 { color: #e94560; font-size: 16px; border-bottom: 1px solid #0f3460; padding-bottom: 6px; }
+.panel h3 { color: #53a8b6; font-size: 13px; margin-bottom: 4px; }
+.cg { background: #1a1a2e; border-radius: 6px; padding: 10px; }
+.cr { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+.cr:last-child { margin-bottom:0; }
+.cr label { font-size:12px; color:#aaa; min-width:60px; }
+.cr input[type="number"] {
+  width:70px; padding:3px 6px; background:#0f3460; border:1px solid #53a8b6;
+  border-radius:4px; color:#e0e0e0; font-size:12px; text-align:right;
+}
+.cr input[type="range"] { flex:1; margin:0 6px; accent-color:#e94560; }
+.cr .val { font-size:11px; color:#53a8b6; min-width:36px; text-align:right; }
+.btn {
+  padding:8px 12px; border:none; border-radius:5px; cursor:pointer;
+  font-size:13px; font-weight:600; transition:all .2s; width:100%;
+}
+.btn:hover { transform:translateY(-1px); filter:brightness(1.1); }
+.btn-primary { background:#e94560; color:#fff; }
+.btn-green   { background:#2ecc71; color:#fff; }
+.btn-blue    { background:#3498db; color:#fff; }
+.btn-orange  { background:#e67e22; color:#fff; }
+.btn-gray    { background:#555;    color:#fff; }
+.btn-row { display:flex; gap:6px; }
+.btn-row .btn { flex:1; }
+.sb { background:#1a1a2e; border-radius:6px; padding:10px; font-size:12px; line-height:1.6; }
+.sb .l { color:#888; }
+.sb .v { color:#53a8b6; font-weight:600; }
+.sb .v.ok { color:#2ecc71; }
+.sb .v.er { color:#e94560; }
+.legend { display:flex; flex-wrap:wrap; gap:8px; font-size:11px; }
+.legend-item { display:flex; align-items:center; gap:3px; }
+.legend-dot { width:12px; height:12px; border-radius:2px; border:1px solid rgba(255,255,255,0.2); }
+.mi { text-align:center; padding:6px; border-radius:5px; font-size:13px; font-weight:600; }
+.mi.ss { background:rgba(46,204,113,0.2);color:#2ecc71; }
+.mi.se { background:rgba(231,76,60,0.2);color:#e74c3c; }
+.mi.ao { background:rgba(52,152,219,0.2);color:#3498db; }
+.mi.nn { background:rgba(150,150,150,0.2);color:#999; }
+.hint { font-size:10px; color:#666; text-align:center; line-height:1.4; }
+.cam-info { font-size:10px; color:#53a8b6; text-align:center; font-family:monospace; }
+</style>
+</head>
+<body>
+
+<div class="canvas-area">
+  <canvas id="canvas" width="850" height="850"></canvas>
+</div>
+
+<div class="panel">
+  <h2>🧭 矩形绕路寻路 · 大地图</h2>
+  <div class="cam-info" id="camInfo">缩放: 1.0x | 地图: 50000×50000</div>
+
+  <div class="mi nn" id="modeLabel">滚轮缩放 · 拖动地图</div>
+
+  <div class="cg">
+    <h3>操作</h3>
+    <div class="btn-row">
+      <button class="btn btn-blue" onclick="setMode('addObs')">+静止障碍</button>
+      <button class="btn btn-gray" onclick="setMode('addMovObs')">+移动障碍</button>
+    </div>
+  </div>
+
+  <div class="cg">
+    <h3>新障碍物尺寸</h3>
+    <div class="cr"><label>宽度</label><input type="number" id="obsW" value="500" min="100" max="5000" step="50"></div>
+    <div class="cr"><label>高度</label><input type="number" id="obsH" value="500" min="100" max="5000" step="50"></div>
+  </div>
+
+  <div class="cg">
+    <h3>执行</h3>
+    <div class="btn-row">
+      <button class="btn btn-blue" onclick="saveMap()">💾 保存地图</button>
+    </div>
+  </div>
+
+  <div class="sb" id="statusBar">
+    <div><span class="l">帧率: </span><span class="v" id="stFPS">-</span></div>
+    <div><span class="l">障碍: </span><span class="v" id="stObs">-</span></div>
+  </div>
+
+  <div class="cg">
+    <h3>寻路耗时日志</h3>
+    <div id="pathLogArea" style="max-height:140px;overflow-y:auto;font-size:10px;font-family:monospace;background:#0f3460;padding:6px;border-radius:4px;line-height:1.5;">
+      <div style="color:#666;">等待移动障碍物寻路...</div>
+    </div>
+  </div>
+
+  <div class="cg">
+    <h3>图例</h3>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#2ecc71"></div>起点</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e74c3c"></div>终点</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e94560"></div>静止障碍</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f39c12"></div>移动障碍</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#3498db"></div>移动者</div>
+    </div>
+  </div>
+
+  <div class="hint">
+    滚轮 = 缩放 · 左键/右键拖拽 = 平移地图<br>
+    左键点击障碍物 = 拖拽 · 中键 = 删除
+  </div>
+</div>
+
+<script>
+// =========================================================================
+// 常量 & 全局
+// =========================================================================
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const CW = canvas.width, CH = canvas.height;
+let MAP_W = 50000, MAP_H = 50000;
+
+// 相机 (世界坐标系: 左下角原点, Y朝上)
+let cam = { x: MAP_W/2, y: MAP_H/2, zoom: 1.0 };
+let BASE_SCALE = CW / MAP_W; // ~0.017 px/unit at zoom=1
+
+// 世界 ↔ 屏幕 坐标转换
+function w2s(wx, wy) {
+  const s = BASE_SCALE * cam.zoom;
+  return [(wx - cam.x) * s + CW/2, (cam.y - wy) * s + CH/2];
+}
+function s2w(sx, sy) {
+  const s = BASE_SCALE * cam.zoom;
+  return [(sx - CW/2) / s + cam.x, cam.y - (sy - CH/2) / s];
+}
+function wsize(w, h) { const s = BASE_SCALE * cam.zoom; return [w*s, h*s]; }
+
+// 数据
+let mode = 'none';
+let obstacles = [];
+let nextID = 1;
+let worldActive = false;
+let worldTickInFlight = false;
+
+// 移动障碍物数据 (包含路径和目标)
+let movingObsData = {}; // id -> {cx, cy, path, targetX, targetY}
+
+// 寻路耗时日志
+let pathStats = null; // 存储最新的统计信息
+const MAX_PATH_LOGS = 50;
+
+// 交互
+let panning = false;
+let panStart = null;
+let dragging = null;
+
+// FPS
+let fpsFrames = 0, fpsTime = 0, fpsDisplay = 0;
+
+// =========================================================================
+// 从服务端配置文件加载障碍物
+// =========================================================================
+async function loadMapConfig() {
+  try {
+    const resp = await fetch('/api/mapconfig');
+    const cfg = await resp.json();
+    MAP_W = cfg.mapW;
+    MAP_H = cfg.mapH;
+    BASE_SCALE = CW / MAP_W;
+    cam = { x: MAP_W/2, y: MAP_H/2, zoom: 1.0 };
+
+    obstacles = [];
+    let maxID = 0;
+    for (const o of cfg.obstacles) {
+      obstacles.push({ cx: o.cx, cy: o.cy, w: o.w, h: o.h, id: o.id, moving: o.moving });
+      if (o.id > maxID) maxID = o.id;
+    }
+    nextID = maxID + 1;
+
+    document.getElementById('stObs').textContent =
+      `${obstacles.filter(o=>!o.moving).length} 静止 + ${obstacles.filter(o=>o.moving).length} 移动`;
+    document.getElementById('camInfo').textContent =
+      `缩放: ${cam.zoom.toFixed(1)}x | 地图: ${MAP_W}×${MAP_H}`;
+  } catch (e) {
+    console.error('加载地图配置失败, 使用随机生成', e);
+    generateObstacles();
+  }
+}
+
+function generateObstacles() {
+  obstacles = [];
+  nextID = 1;
+
+  // 400 个静止障碍物 (缩小尺寸避免过密)
+  for (let i = 0; i < 400; i++) {
+    const w = 150 + Math.random() * 1200;
+    const h = 150 + Math.random() * 1200;
+    const cx = w/2 + 200 + Math.random() * (MAP_W - w - 400);
+    const cy = h/2 + 200 + Math.random() * (MAP_H - h - 400);
+    obstacles.push({ cx, cy, w, h, id: nextID++, moving: false });
+  }
+
+  // 20 个移动障碍物 (正方形, 半径为 2 的幂次: 4,8,16,32,64,128)
+  const movingSizes = [4, 8, 16, 32, 64, 128]; // 半径(halfW), 边长=2*半径
+  for (let i = 0; i < 20; i++) {
+    const half = movingSizes[Math.floor(Math.random() * movingSizes.length)];
+    const side = half * 2; // 边长
+    const cx = side/2 + 200 + Math.random() * (MAP_W - side - 400);
+    const cy = side/2 + 200 + Math.random() * (MAP_H - side - 400);
+    obstacles.push({ cx, cy, w: side, h: side, id: nextID++, moving: true });
+  }
+
+  // 确保起点/终点附近没有障碍物
+  clearAreaAround(startPt.x, startPt.y, 800);
+  clearAreaAround(endPt.x, endPt.y, 800);
+
+  document.getElementById('stObs').textContent =
+    `${obstacles.filter(o=>!o.moving).length} 静止 + ${obstacles.filter(o=>o.moving).length} 移动`;
+}
+
+// 清除某点周围的障碍物，确保可通行
+function clearAreaAround(px, py, radius) {
+  obstacles = obstacles.filter(o => {
+    const dx = o.cx - px, dy = o.cy - py;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    return dist > radius + Math.max(o.w, o.h)/2;
+  });
+}
+
+
+
+// =========================================================================
+// 绘制
+// =========================================================================
+function isVisible(cx, cy, hw, hh) {
+  // 快速裁剪: 障碍物是否在屏幕内
+  const [sx, sy] = w2s(cx, cy);
+  const [sw, sh] = wsize(hw*2, hh*2);
+  return sx + sw/2 > -50 && sx - sw/2 < CW+50 && sy + sh/2 > -50 && sy - sh/2 < CH+50;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, CW, CH);
+  const s = BASE_SCALE * cam.zoom;
+  const pixPerUnit = s;
+
+  // ---- 网格 ----
+  if (pixPerUnit > 0.001) {
+    // 自适应网格间距
+    let gridStep = 1000;
+    if (pixPerUnit > 0.01) gridStep = 5000;
+    if (pixPerUnit > 0.05) gridStep = 1000;
+    if (pixPerUnit > 0.2)  gridStep = 500;
+    if (pixPerUnit > 1)    gridStep = 100;
+
+    ctx.strokeStyle = 'rgba(15,52,96,0.4)';
+    ctx.lineWidth = 0.5;
+
+    // 可见范围
+    const [wl, wt] = s2w(0, 0);
+    const [wr, wb] = s2w(CW, CH);
+    const wxMin = Math.min(wl, wr), wxMax = Math.max(wl, wr);
+    const wyMin = Math.min(wt, wb), wyMax = Math.max(wt, wb);
+
+    const gxStart = Math.floor(wxMin / gridStep) * gridStep;
+    const gxEnd   = Math.ceil(wxMax / gridStep) * gridStep;
+    const gyStart = Math.floor(wyMin / gridStep) * gridStep;
+    const gyEnd   = Math.ceil(wyMax / gridStep) * gridStep;
+
+    for (let gx = gxStart; gx <= gxEnd; gx += gridStep) {
+      if (gx < 0 || gx > MAP_W) continue;
+      const [sx] = w2s(gx, 0);
+      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, CH); ctx.stroke();
+    }
+    for (let gy = gyStart; gy <= gyEnd; gy += gridStep) {
+      if (gy < 0 || gy > MAP_H) continue;
+      const [, sy] = w2s(0, gy);
+      ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(CW, sy); ctx.stroke();
+    }
+  }
+
+  // ---- 地图边界 ----
+  {
+    const [x0, y0] = w2s(0, MAP_H);
+    const [bw, bh] = wsize(MAP_W, MAP_H);
+    ctx.strokeStyle = '#0f3460';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x0, y0, bw, bh);
+  }
+
+  // ---- 障碍物 ----
+  const showLabel = pixPerUnit > 0.08;
+  for (const obs of obstacles) {
+    if (!isVisible(obs.cx, obs.cy, obs.w/2, obs.h/2)) continue;
+
+    const [bx, by] = w2s(obs.cx - obs.w/2, obs.cy + obs.h/2);
+    const [bw, bh] = wsize(obs.w, obs.h);
+
+    if (bw < 1 && bh < 1) {
+      // 太小，画点
+      ctx.fillStyle = obs.moving ? '#f39c12' : '#e94560';
+      ctx.fillRect(bx, by, Math.max(bw, 2), Math.max(bh, 2));
+      continue;
+    }
+
+    ctx.fillStyle = obs.moving ? 'rgba(243,156,18,0.5)' : 'rgba(233,69,96,0.45)';
+    ctx.strokeStyle = obs.moving ? '#f39c12' : '#e94560';
+    ctx.lineWidth = Math.max(1, Math.min(2, pixPerUnit * 20));
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeRect(bx, by, bw, bh);
+
+    // 如果是移动物体且到达目的地等待中，绘制绿色边框
+    if (obs.moving) {
+      const data = movingObsData[obs.id];
+      if (data && data.waitingAtDest) {
+        ctx.strokeStyle = '#2ecc71';
+        ctx.lineWidth = Math.max(2, Math.min(4, pixPerUnit * 30));
+        ctx.strokeRect(bx, by, bw, bh);
+        
+        // 绘制倒计时
+        if (showLabel && bw > 20) {
+          const [cx2, cy2] = w2s(obs.cx, obs.cy);
+          ctx.fillStyle = '#2ecc71';
+          ctx.font = `bold ${Math.min(14, Math.max(9, bw/4))}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const countdownText = (data.waitRemainingMs / 1000).toFixed(1) + 's';
+          ctx.fillText(countdownText, cx2, cy2 - Math.max(12, bh * 0.35));
+        }
+      }
+    }
+
+    if (showLabel && bw > 20) {
+      const [cx2, cy2] = w2s(obs.cx, obs.cy);
+      ctx.fillStyle = '#fff';
+      ctx.font = `${Math.min(12, Math.max(8, bw/5))}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(obs.moving ? `M${obs.id}` : `#${obs.id}`, cx2, cy2);
+    }
+  }
+
+  // ---- 移动障碍物的路径 ----
+  for (const obs of obstacles) {
+    if (!obs.moving) continue;
+    const data = movingObsData[obs.id];
+    if (!data) continue;
+
+    // 绘制路径线（仅当有路径时）
+    if (data.path && data.path.length >= 2) {
+      ctx.strokeStyle = 'rgba(243,156,18,0.6)';
+      ctx.lineWidth = Math.max(1, Math.min(2, pixPerUnit * 15));
+      ctx.setLineDash([Math.max(3, pixPerUnit*40), Math.max(2, pixPerUnit*20)]);
+      ctx.beginPath();
+      for (let i = 0; i < data.path.length; i++) {
+        const [px, py] = w2s(data.path[i].x, data.path[i].y);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 绘制目标点（始终显示，只要有目标坐标）
+    if (data.targetX !== undefined && data.targetY !== undefined) {
+      const [tx, ty] = w2s(data.targetX, data.targetY);
+      ctx.beginPath();
+      ctx.arc(tx, ty, Math.max(3, Math.min(8, pixPerUnit * 50)), 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(243,156,18,0.8)';
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+}
+
+// =========================================================================
+// 相机控制
+// =========================================================================
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const sx = (e.clientX - rect.left) * (CW / rect.width);
+  const sy = (e.clientY - rect.top)  * (CH / rect.height);
+  const [wx, wy] = s2w(sx, sy);
+
+  const factor = e.deltaY < 0 ? 1.15 : 1/1.15;
+  const newZoom = Math.max(0.3, Math.min(500, cam.zoom * factor));
+  cam.zoom = newZoom;
+
+  // 保持鼠标位置对应的世界坐标不变
+  const s = BASE_SCALE * cam.zoom;
+  cam.x = wx - (sx - CW/2) / s;
+  cam.y = wy + (sy - CH/2) / s;
+
+  updateCamInfo();
+}, { passive: false });
+
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = (e.clientX - rect.left) * (CW / rect.width);
+  const sy = (e.clientY - rect.top)  * (CH / rect.height);
+  const [wx, wy] = s2w(sx, sy);
+
+  // 右键: 平移
+  if (e.button === 2) {
+    panning = true;
+    panStart = { sx, sy, cx: cam.x, cy: cam.y };
+    canvas.style.cursor = 'grabbing';
+    return;
+  }
+
+  // 中键: 删除障碍物
+  if (e.button === 1) {
+    e.preventDefault();
+    const hit = getObsAt(wx, wy);
+    if (hit) { obstacles.splice(hit.index, 1); path = null; }
+    return;
+  }
+
+  // 左键
+  if (mode === 'addObs' || mode === 'addMovObs') {
+    const ow = parseFloat(document.getElementById('obsW').value) || 500;
+    const oh = parseFloat(document.getElementById('obsH').value) || 500;
+    const isMoving = mode === 'addMovObs';
+    const newObs = { cx: wx, cy: wy, w: ow, h: oh, id: nextID++, moving: isMoving };
+    obstacles.push(newObs);
+    updateObsCount();
+    // 动态添加障碍物到服务端，不会打断现有物体的移动逻辑
+    addObstacleToWorld(newObs);
+    return;
+  }
+
+  // 拖拽障碍物
+  const hit = getObsAt(wx, wy);
+  if (hit) {
+    dragging = { obs: hit.obs, offX: wx - hit.obs.cx, offY: wy - hit.obs.cy };
+    canvas.style.cursor = 'grabbing';
+  } else {
+    // 左键空白区域：平移地图
+    panning = true;
+    panStart = { sx, sy, cx: cam.x, cy: cam.y };
+    canvas.style.cursor = 'grabbing';
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = (e.clientX - rect.left) * (CW / rect.width);
+  const sy = (e.clientY - rect.top)  * (CH / rect.height);
+
+  if (panning && panStart) {
+    const s = BASE_SCALE * cam.zoom;
+    cam.x = panStart.cx - (sx - panStart.sx) / s;
+    cam.y = panStart.cy + (sy - panStart.sy) / s;
+    updateCamInfo();
+    return;
+  }
+
+  if (dragging) {
+    const [wx, wy] = s2w(sx, sy);
+    dragging.obs.cx = wx - dragging.offX;
+    dragging.obs.cy = wy - dragging.offY;
+    path = null;
+  }
+});
+
+canvas.addEventListener('mouseup', () => {
+  panning = false; panStart = null;
+  dragging = null;
+  canvas.style.cursor = 'crosshair';
+});
+
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+function getObsAt(wx, wy) {
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    if (wx >= o.cx - o.w/2 && wx <= o.cx + o.w/2 && wy >= o.cy - o.h/2 && wy <= o.cy + o.h/2) {
+      return { obs: o, index: i };
+    }
+  }
+  return null;
+}
+
+// =========================================================================
+// UI 辅助
+// =========================================================================
+function setMode(m) {
+  mode = m;
+  const label = document.getElementById('modeLabel');
+  const map = {
+    addObs:['ao', '👆 点击画布添加静止障碍'],
+    addMovObs:['ao', '👆 点击画布添加移动障碍'],
+    none:  ['nn', '滚轮缩放 · 拖动地图'],
+  };
+  const [cls, txt] = map[m] || map.none;
+  label.className = 'mi ' + cls;
+  label.textContent = txt;
+}
+
+function updateCamInfo() {
+  document.getElementById('camInfo').textContent =
+    `缩放: ${cam.zoom.toFixed(1)}x | 中心: (${cam.x.toFixed(0)}, ${cam.y.toFixed(0)})`;
+}
+
+function updateObsCount() {
+  document.getElementById('stObs').textContent =
+    `${obstacles.filter(o=>!o.moving).length} 静止 + ${obstacles.filter(o=>o.moving).length} 移动`;
+}
+
+// =========================================================================
+// API 通信
+// =========================================================================
+function getObsJSON() {
+  return obstacles.map(o => ({ cx:o.cx, cy:o.cy, w:o.w, h:o.h, id:o.id, moving:o.moving }));
+}
+
+// 初始化世界 — 将障碍物发送到服务端，移动障碍物立即开始漫游
+async function initWorld() {
+  try {
+    await fetch('/api/initworld', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mapW: MAP_W, mapH: MAP_H, obstacles: getObsJSON() })
+    });
+    worldActive = true;
+  } catch (e) {
+    console.error('initworld failed', e);
+  }
+}
+
+// 动态添加单个障碍物 — 不会打断现有物体的移动逻辑
+async function addObstacleToWorld(obs) {
+  try {
+    await fetch('/api/addobstacle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(obs)
+    });
+  } catch (e) {
+    console.error('addobstacle failed', e);
+  }
+}
+
+// 保存当前地图到 map_config.json
+async function saveMap() {
+  try {
+    const resp = await fetch('/api/savemap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mapW: MAP_W, mapH: MAP_H, obstacles: getObsJSON() })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      alert('✅ ' + data.message);
+    } else {
+      alert('❌ 保存失败');
+    }
+  } catch (e) {
+    console.error('savemap failed', e);
+    alert('❌ 保存失败: ' + e.message);
+  }
+}
+
+
+
+// 世界 tick — 始终运行，更新移动障碍物位置和路径
+async function doWorldTick() {
+  if (!worldActive || worldTickInFlight) return;
+  worldTickInFlight = true;
+  try {
+    const resp = await fetch('/api/tickworld');
+    const data = await resp.json();
+    if (data.active && data.movingObs) {
+      // 更新移动障碍物位置、路径和目标
+      for (const m of data.movingObs) {
+        movingObsData[m.id] = {
+          cx: m.cx, cy: m.cy,
+          path: m.path || [],
+          targetX: m.targetX, targetY: m.targetY,
+          waitingAtDest: m.waitingAtDest || false,
+          waitRemainingMs: m.waitRemainingMs || 0
+        };
+        // 同步更新 obstacles 数组中的位置
+        for (const obs of obstacles) {
+          if (obs.moving && obs.id === m.id) {
+            obs.cx = m.cx;
+            obs.cy = m.cy;
+            break;
+          }
+        }
+      }
+      // 处理寻路统计信息
+      if (data.pathStats) {
+        pathStats = data.pathStats;
+        updatePathLogDisplay();
+      }
+    }
+  } catch (e) { /* 忽略网络抖动 */ }
+  worldTickInFlight = false;
+}
+
+// 更新寻路日志显示
+function updatePathLogDisplay() {
+  const area = document.getElementById('pathLogArea');
+  if (!pathStats || !pathStats.hasData) {
+    area.innerHTML = '<div style="color:#666;">等待移动障碍物寻路...</div>';
+    return;
+  }
+  
+  const statusColor = pathStats.maxSuccess ? '#2ecc71' : '#e74c3c';
+  const statusText = pathStats.maxSuccess ? '成功' : '失败';
+  
+  let html = '<div style="margin-bottom:8px;padding:6px;background:rgba(255,255,255,0.05);border-radius:3px;">';
+  html += '<div style="color:#3498db;font-weight:bold;margin-bottom:4px;">📊 寻路性能统计</div>';
+  html += `<div style="color:#ecf0f1;">平均耗时: <span style="color:#2ecc71;font-weight:bold;">${pathStats.avgTimeMs.toFixed(2)}ms</span> (${pathStats.totalCount}次)</div>`;
+  html += `<div style="color:#ecf0f1;margin-top:2px;">5秒最慢: M${pathStats.maxID} <span style="color:${statusColor};font-weight:bold;">${pathStats.maxTimeMs.toFixed(2)}ms</span> [${statusText}]</div>`;
+  html += '</div>';
+  
+  area.innerHTML = html;
+}
+
+
+
+// =========================================================================
+// 主循环 — 固定 60fps
+// =========================================================================
+let lastFrameTime = 0;
+
+function gameLoop(now) {
+  requestAnimationFrame(gameLoop);
+
+  // 限制 60fps
+  if (now - lastFrameTime < 16) return;
+  lastFrameTime = now;
+
+  // FPS 计数
+  fpsFrames++;
+  if (now - fpsTime >= 1000) {
+    fpsDisplay = fpsFrames;
+    fpsFrames = 0;
+    fpsTime = now;
+    document.getElementById('stFPS').textContent = fpsDisplay + ' FPS';
+  }
+
+  // 世界 tick (移动障碍物始终运行)
+  doWorldTick();
+
+  // 绘制
+  draw();
+}
+
+// =========================================================================
+// 初始化 — 从服务端配置文件加载地图
+// =========================================================================
+loadMapConfig().then(() => {
+  updateCamInfo();
+  // 服务端启动时已从配置文件初始化世界，无需再调 initWorld
+  worldActive = true;
+  console.log('地图配置已从服务端加载, 移动障碍物已开始运动');
+});
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
